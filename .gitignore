@@ -14,3 +14,12 @@ wheels/
 .venv
 .env.example
 .idea
+
+# Claude Code configuration (contains local paths)
+.claude/
+
+# Test files
+test.docx
+*.png
+change_resume_font.py
+*简历*.docx
