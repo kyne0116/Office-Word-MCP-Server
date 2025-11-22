@@ -21,6 +21,7 @@
 - [第3章：MCP Client 配置](#第3章mcp-client-配置)
   - [3.1 Claude Code 配置](#31-claude-code-配置)
   - [3.2 VSCode + Cline 配置](#32-vscode--cline-配置)
+  - [3.3 Spring AI Alibaba 配置](#33-spring-ai-alibaba-配置)
 - [第4章：使用示例](#第4章使用示例)
   - [4.1 通过 Claude Code 使用](#41-通过-claude-code-使用)
   - [4.2 通过 Cline 使用](#42-通过-cline-使用)
@@ -1005,6 +1006,707 @@ Cline 还支持通过 UI 添加 MCP Server：
 | **Windows** | `%APPDATA%\Code\User\globalStorage\saoudrizwan.cline\settings\cline_mcp_settings.json` |
 | **Linux** | `~/.config/Code/User/globalStorage/saoudrizwan.cline/settings/cline_mcp_settings.json` |
 | **macOS** | `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.cline/settings/cline_mcp_settings.json` |
+
+---
+
+### 3.3 Spring AI Alibaba 配置
+
+#### 什么是 Spring AI Alibaba
+
+**Spring AI Alibaba** 是阿里巴巴开源的 AI 应用开发框架，提供：
+- 统一的 AI 服务调用接口
+- 原生支持 MCP (Model Context Protocol) 协议
+- 与 Spring Boot 无缝集成
+- 支持多种 AI 模型和工具调用
+
+**官网**: [https://sca.aliyun.com/ai/](https://sca.aliyun.com/ai/)
+
+**GitHub**: [https://github.com/alibaba/spring-ai-alibaba](https://github.com/alibaba/spring-ai-alibaba)
+
+#### 环境要求
+
+| 项目 | 要求 |
+|------|------|
+| Java | JDK 17 或更高版本 |
+| Spring Boot | 3.2.0 或更高版本 |
+| Maven/Gradle | Maven 3.6+ / Gradle 7.0+ |
+| Python | 3.11+ (用于运行 MCP Server) |
+
+#### 项目依赖配置
+
+##### Maven 配置
+
+在 `pom.xml` 中添加依赖：
+
+```xml
+<dependencies>
+    <!-- Spring AI Alibaba Starter -->
+    <dependency>
+        <groupId>com.alibaba.cloud.ai</groupId>
+        <artifactId>spring-ai-alibaba-starter</artifactId>
+        <version>1.0.0-M2</version>
+    </dependency>
+
+    <!-- Spring Boot Starter Web -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <!-- Lombok (可选，简化代码) -->
+    <dependency>
+        <groupId>org.projectlombok</groupId>
+        <artifactId>lombok</artifactId>
+        <optional>true</optional>
+    </dependency>
+</dependencies>
+```
+
+##### Gradle 配置
+
+在 `build.gradle` 中添加依赖：
+
+```gradle
+dependencies {
+    // Spring AI Alibaba Starter
+    implementation 'com.alibaba.cloud.ai:spring-ai-alibaba-starter:1.0.0-M2'
+
+    // Spring Boot Starter Web
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    // Lombok (可选)
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+}
+```
+
+#### MCP Server 连接配置
+
+##### 配置方式一：使用 STDIO 传输（推荐）
+
+在 `application.yml` 中配置：
+
+```yaml
+spring:
+  ai:
+    alibaba:
+      mcp:
+        servers:
+          # Word 文档 MCP Server 配置
+          word-document-server:
+            # 使用 STDIO 传输
+            transport: stdio
+            # Python 解释器路径
+            command: python
+            # MCP Server 启动脚本路径（需要修改为实际路径）
+            args:
+              - D:/02_Dev/Workspace/GitHub/Office-Word-MCP-Server/word_mcp_server.py
+            # 环境变量
+            env:
+              PYTHONPATH: D:/02_Dev/Workspace/GitHub/Office-Word-MCP-Server
+              MCP_TRANSPORT: stdio
+            # 是否启用该 Server
+            enabled: true
+```
+
+**Linux 配置示例**：
+
+```yaml
+spring:
+  ai:
+    alibaba:
+      mcp:
+        servers:
+          word-document-server:
+            transport: stdio
+            command: /home/user/Office-Word-MCP-Server/.venv/bin/python
+            args:
+              - /home/user/Office-Word-MCP-Server/word_mcp_server.py
+            env:
+              PYTHONPATH: /home/user/Office-Word-MCP-Server
+              MCP_TRANSPORT: stdio
+            enabled: true
+```
+
+##### 配置方式二：使用 HTTP 传输
+
+**步骤1**：启动 MCP Server（HTTP 模式）
+
+```bash
+# 修改 .env 文件
+MCP_TRANSPORT=streamable-http
+MCP_HOST=127.0.0.1
+MCP_PORT=8000
+MCP_PATH=/mcp
+
+# 启动 Server
+python word_mcp_server.py
+```
+
+**步骤2**：配置 `application.yml`
+
+```yaml
+spring:
+  ai:
+    alibaba:
+      mcp:
+        servers:
+          word-document-server:
+            # 使用 HTTP 传输
+            transport: http
+            # MCP Server HTTP 地址
+            url: http://127.0.0.1:8000/mcp
+            # 超时设置（毫秒）
+            timeout: 30000
+            enabled: true
+```
+
+##### 配置方式三：使用 SSE 传输
+
+**步骤1**：启动 MCP Server（SSE 模式）
+
+```bash
+# 修改 .env 文件
+MCP_TRANSPORT=sse
+MCP_HOST=127.0.0.1
+MCP_PORT=8000
+MCP_SSE_PATH=/sse
+
+# 启动 Server
+python word_mcp_server.py
+```
+
+**步骤2**：配置 `application.yml`
+
+```yaml
+spring:
+  ai:
+    alibaba:
+      mcp:
+        servers:
+          word-document-server:
+            # 使用 SSE 传输
+            transport: sse
+            # MCP Server SSE 地址
+            url: http://127.0.0.1:8000/sse
+            timeout: 30000
+            enabled: true
+```
+
+#### 配置字段说明
+
+| 字段 | 说明 | 必填 | 示例值 |
+|------|------|------|--------|
+| `transport` | 传输方式 | 是 | `stdio` / `http` / `sse` |
+| `command` | Python 解释器路径 | STDIO 模式必填 | `python` 或完整路径 |
+| `args` | 启动脚本参数 | STDIO 模式必填 | `["/path/to/word_mcp_server.py"]` |
+| `env` | 环境变量 | 可选 | `PYTHONPATH`, `MCP_TRANSPORT` 等 |
+| `url` | HTTP/SSE 地址 | HTTP/SSE 模式必填 | `http://127.0.0.1:8000/mcp` |
+| `timeout` | 超时时间（毫秒） | 可选 | `30000` |
+| `enabled` | 是否启用 | 可选 | `true` / `false` |
+
+#### Java 代码示例
+
+##### 示例1：注入 MCP 工具并使用
+
+创建服务类 `WordDocumentService.java`：
+
+```java
+package com.example.demo.service;
+
+import com.alibaba.cloud.ai.mcp.McpToolClient;
+import org.springframework.stereotype.Service;
+import java.util.Map;
+
+@Service
+public class WordDocumentService {
+
+    private final McpToolClient mcpToolClient;
+
+    public WordDocumentService(McpToolClient mcpToolClient) {
+        this.mcpToolClient = mcpToolClient;
+    }
+
+    /**
+     * 创建 Word 文档
+     */
+    public String createDocument(String filename, String title, String author) {
+        Map<String, Object> params = Map.of(
+            "filename", filename,
+            "title", title,
+            "author", author
+        );
+
+        return mcpToolClient.executeTool(
+            "word-document-server",  // MCP Server 名称
+            "create_document",        // 工具名称
+            params                    // 参数
+        );
+    }
+
+    /**
+     * 添加段落
+     */
+    public String addParagraph(String filename, String text, String fontName, int fontSize) {
+        Map<String, Object> params = Map.of(
+            "filename", filename,
+            "text", text,
+            "font_name", fontName,
+            "font_size", fontSize
+        );
+
+        return mcpToolClient.executeTool(
+            "word-document-server",
+            "add_paragraph",
+            params
+        );
+    }
+
+    /**
+     * 添加标题
+     */
+    public String addHeading(String filename, String text, int level) {
+        Map<String, Object> params = Map.of(
+            "filename", filename,
+            "text", text,
+            "level", level
+        );
+
+        return mcpToolClient.executeTool(
+            "word-document-server",
+            "add_heading",
+            params
+        );
+    }
+
+    /**
+     * 添加表格
+     */
+    public String addTable(String filename, int rows, int cols, String[][] data) {
+        Map<String, Object> params = Map.of(
+            "filename", filename,
+            "rows", rows,
+            "cols", cols,
+            "data", data
+        );
+
+        return mcpToolClient.executeTool(
+            "word-document-server",
+            "add_table",
+            params
+        );
+    }
+}
+```
+
+##### 示例2：创建 REST 控制器
+
+创建控制器 `WordDocumentController.java`：
+
+```java
+package com.example.demo.controller;
+
+import com.example.demo.service.WordDocumentService;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/word")
+public class WordDocumentController {
+
+    private final WordDocumentService wordDocumentService;
+
+    public WordDocumentController(WordDocumentService wordDocumentService) {
+        this.wordDocumentService = wordDocumentService;
+    }
+
+    /**
+     * 创建文档
+     * POST /api/word/create
+     */
+    @PostMapping("/create")
+    public String createDocument(
+            @RequestParam String filename,
+            @RequestParam String title,
+            @RequestParam(required = false) String author) {
+        return wordDocumentService.createDocument(
+            filename,
+            title,
+            author != null ? author : "System"
+        );
+    }
+
+    /**
+     * 添加段落
+     * POST /api/word/paragraph
+     */
+    @PostMapping("/paragraph")
+    public String addParagraph(
+            @RequestParam String filename,
+            @RequestParam String text,
+            @RequestParam(defaultValue = "宋体") String fontName,
+            @RequestParam(defaultValue = "12") int fontSize) {
+        return wordDocumentService.addParagraph(filename, text, fontName, fontSize);
+    }
+
+    /**
+     * 添加标题
+     * POST /api/word/heading
+     */
+    @PostMapping("/heading")
+    public String addHeading(
+            @RequestParam String filename,
+            @RequestParam String text,
+            @RequestParam(defaultValue = "1") int level) {
+        return wordDocumentService.addHeading(filename, text, level);
+    }
+
+    /**
+     * 生成报告（综合示例）
+     * POST /api/word/report
+     */
+    @PostMapping("/report")
+    public String generateReport(@RequestParam String filename) {
+        // 创建文档
+        wordDocumentService.createDocument(filename, "月度报告", "Spring AI");
+
+        // 添加主标题
+        wordDocumentService.addHeading(filename, "2025年1月工作报告", 1);
+
+        // 添加副标题
+        wordDocumentService.addHeading(filename, "一、工作概述", 2);
+
+        // 添加段落
+        wordDocumentService.addParagraph(
+            filename,
+            "本月主要完成了系统架构升级和性能优化工作。",
+            "宋体",
+            12
+        );
+
+        // 添加表格
+        String[][] tableData = {
+            {"任务", "状态", "完成度"},
+            {"架构升级", "已完成", "100%"},
+            {"性能优化", "进行中", "80%"}
+        };
+        wordDocumentService.addTable(filename, 3, 3, tableData);
+
+        return "报告生成成功：" + filename;
+    }
+}
+```
+
+##### 示例3：与 AI 模型结合使用
+
+```java
+package com.example.demo.service;
+
+import com.alibaba.cloud.ai.mcp.McpToolClient;
+import org.springframework.ai.chat.ChatClient;
+import org.springframework.ai.chat.ChatResponse;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.stereotype.Service;
+
+@Service
+public class AIDocumentService {
+
+    private final ChatClient chatClient;
+    private final McpToolClient mcpToolClient;
+
+    public AIDocumentService(ChatClient chatClient, McpToolClient mcpToolClient) {
+        this.chatClient = chatClient;
+        this.mcpToolClient = mcpToolClient;
+    }
+
+    /**
+     * AI 驱动的文档生成
+     */
+    public String generateAIDocument(String topic, String filename) {
+        // 1. 使用 AI 生成文档内容
+        String prompt = String.format(
+            "请为主题'%s'生成一份结构化的文档大纲，包含标题、章节和内容。",
+            topic
+        );
+
+        ChatResponse response = chatClient.call(new Prompt(prompt));
+        String content = response.getResult().getOutput().getContent();
+
+        // 2. 使用 MCP 工具创建文档
+        mcpToolClient.executeTool(
+            "word-document-server",
+            "create_document",
+            Map.of("filename", filename, "title", topic)
+        );
+
+        // 3. 添加 AI 生成的内容
+        mcpToolClient.executeTool(
+            "word-document-server",
+            "add_paragraph",
+            Map.of("filename", filename, "text", content)
+        );
+
+        return "AI 文档生成完成：" + filename;
+    }
+}
+```
+
+#### 验证和测试
+
+##### 测试1：启动应用
+
+```bash
+# 启动 Spring Boot 应用
+mvn spring-boot:run
+
+# 或使用 Gradle
+gradle bootRun
+```
+
+查看日志，确认 MCP Server 连接成功：
+
+```
+INFO  c.a.c.a.m.McpClientManager - Connecting to MCP Server: word-document-server
+INFO  c.a.c.a.m.McpClientManager - MCP Server connected successfully
+INFO  c.a.c.a.m.McpClientManager - Available tools: create_document, add_paragraph, add_heading, ...
+```
+
+##### 测试2：使用 curl 测试 API
+
+```bash
+# 创建文档
+curl -X POST "http://localhost:8080/api/word/create" \
+  -d "filename=test.docx" \
+  -d "title=测试文档"
+
+# 添加标题
+curl -X POST "http://localhost:8080/api/word/heading" \
+  -d "filename=test.docx" \
+  -d "text=第一章 引言" \
+  -d "level=1"
+
+# 添加段落
+curl -X POST "http://localhost:8080/api/word/paragraph" \
+  -d "filename=test.docx" \
+  -d "text=这是一段测试内容。"
+
+# 生成完整报告
+curl -X POST "http://localhost:8080/api/word/report" \
+  -d "filename=monthly_report.docx"
+```
+
+##### 测试3：查看生成的文档
+
+```bash
+# 检查文件是否生成
+ls -la *.docx
+
+# Windows
+dir *.docx
+```
+
+打开生成的 `.docx` 文件验证内容。
+
+#### 高级配置
+
+##### 配置多个 MCP Server
+
+```yaml
+spring:
+  ai:
+    alibaba:
+      mcp:
+        servers:
+          # Word 文档 Server
+          word-document-server:
+            transport: stdio
+            command: python
+            args:
+              - D:/path/to/word_mcp_server.py
+            enabled: true
+
+          # 其他 MCP Server（示例）
+          excel-server:
+            transport: http
+            url: http://127.0.0.1:8001/mcp
+            enabled: true
+
+          pdf-server:
+            transport: sse
+            url: http://127.0.0.1:8002/sse
+            enabled: true
+```
+
+##### 配置工具权限控制
+
+```yaml
+spring:
+  ai:
+    alibaba:
+      mcp:
+        servers:
+          word-document-server:
+            transport: stdio
+            command: python
+            args:
+              - D:/path/to/word_mcp_server.py
+            # 允许的工具列表（可选）
+            allowed-tools:
+              - create_document
+              - add_paragraph
+              - add_heading
+              - add_table
+            # 禁止的工具列表（可选）
+            denied-tools:
+              - delete_document
+            enabled: true
+```
+
+##### 配置连接池和超时
+
+```yaml
+spring:
+  ai:
+    alibaba:
+      mcp:
+        # 全局配置
+        connection:
+          timeout: 30000        # 连接超时（毫秒）
+          read-timeout: 60000   # 读取超时（毫秒）
+          max-retries: 3        # 最大重试次数
+        servers:
+          word-document-server:
+            transport: http
+            url: http://127.0.0.1:8000/mcp
+            # Server 级别超时（覆盖全局配置）
+            timeout: 45000
+            enabled: true
+```
+
+#### 故障排除
+
+##### 问题1：MCP Server 连接失败
+
+**症状**：
+
+```
+ERROR c.a.c.a.m.McpClientManager - Failed to connect to MCP Server: word-document-server
+```
+
+**解决方案**：
+
+1. 检查 Python 路径是否正确
+2. 检查 MCP Server 脚本路径
+3. 确认依赖已安装（`pip list | grep fastmcp`）
+4. 手动测试启动：`python word_mcp_server.py`
+
+##### 问题2：工具调用失败
+
+**症状**：
+
+```
+Tool 'create_document' not found in server 'word-document-server'
+```
+
+**解决方案**：
+
+1. 检查工具名称拼写
+2. 确认 MCP Server 已正确启动
+3. 查看 MCP Server 日志
+4. 重启 Spring Boot 应用
+
+##### 问题3：路径包含空格或中文
+
+**症状**：
+
+```
+FileNotFoundError: No such file or directory
+```
+
+**解决方案**：
+
+使用完整路径并正确转义：
+
+```yaml
+spring:
+  ai:
+    alibaba:
+      mcp:
+        servers:
+          word-document-server:
+            command: "D:/Program Files/Python311/python.exe"  # 使用引号
+            args:
+              - "D:/我的项目/Office-Word-MCP-Server/word_mcp_server.py"
+```
+
+或使用短路径（Windows）：
+
+```yaml
+command: "D:/PROGRA~1/Python311/python.exe"
+```
+
+#### 完整项目示例
+
+完整的项目结构：
+
+```
+spring-ai-word-demo/
+├── src/
+│   └── main/
+│       ├── java/
+│       │   └── com/example/demo/
+│       │       ├── DemoApplication.java
+│       │       ├── controller/
+│       │       │   └── WordDocumentController.java
+│       │       └── service/
+│       │           ├── WordDocumentService.java
+│       │           └── AIDocumentService.java
+│       └── resources/
+│           └── application.yml
+├── pom.xml
+└── README.md
+```
+
+**application.yml** 完整配置：
+
+```yaml
+server:
+  port: 8080
+
+spring:
+  application:
+    name: spring-ai-word-demo
+
+  ai:
+    alibaba:
+      # AI 模型配置（如使用通义千问）
+      api-key: ${DASHSCOPE_API_KEY}
+
+      # MCP 配置
+      mcp:
+        servers:
+          word-document-server:
+            transport: stdio
+            command: python
+            args:
+              - D:/02_Dev/Workspace/GitHub/Office-Word-MCP-Server/word_mcp_server.py
+            env:
+              PYTHONPATH: D:/02_Dev/Workspace/GitHub/Office-Word-MCP-Server
+              MCP_TRANSPORT: stdio
+            enabled: true
+
+# 日志配置
+logging:
+  level:
+    com.alibaba.cloud.ai: DEBUG
+    com.example.demo: DEBUG
+```
+
+#### 参考资源
+
+- **Spring AI Alibaba 官方文档**: [https://sca.aliyun.com/ai/](https://sca.aliyun.com/ai/)
+- **MCP 协议规范**: [https://modelcontextprotocol.io/](https://modelcontextprotocol.io/)
+- **Office-Word-MCP-Server GitHub**: [https://github.com/GongRzhe/Office-Word-MCP-Server](https://github.com/GongRzhe/Office-Word-MCP-Server)
+- **Spring AI 官方文档**: [https://docs.spring.io/spring-ai/reference/](https://docs.spring.io/spring-ai/reference/)
 
 ---
 
