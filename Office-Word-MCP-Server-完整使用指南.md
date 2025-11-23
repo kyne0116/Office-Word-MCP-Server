@@ -34,6 +34,10 @@
   - [6.1 安装问题](#61-安装问题)
   - [6.2 配置问题](#62-配置问题)
   - [6.3 连接问题](#63-连接问题)
+- [第7章：企业级部署架构](#第7章企业级部署架构)
+  - [7.1 B/S 部署架构](#71-bs-部署架构)
+  - [7.2 C/S 部署架构](#72-cs-部署架构)
+  - [7.3 架构选型指南](#73-架构选型指南)
 
 ---
 
@@ -2677,6 +2681,790 @@ lsof document.docx
 | `Server timeout` | Server 未启动 | 检查 Server 运行状态 |
 | `Tool not found` | Server 未连接 | 重启 Server 和 Client |
 | `File in use` | 文件被占用 | 关闭 Word 或其他程序 |
+
+---
+
+## 第7章：企业级部署架构
+
+本章介绍如何在企业环境中部署 Office-Word-MCP-Server，实现多用户共享访问。
+
+### 7.1 B/S 部署架构
+
+#### 7.1.1 架构概述
+
+**B/S（Browser/Server）架构** 通过 Web 浏览器访问服务，所有服务组件集中部署在服务器端。
+
+##### 核心特点
+
+| 特点 | 说明 |
+|------|------|
+| **服务端集中部署** | Spring AI（MCP Client）和 MCP Server 都部署在服务器 |
+| **文档在服务器生成** | Word 文档在 MCP Server 所在服务器生成和存储 |
+| **浏览器下载获取** | 用户通过浏览器下载生成的文档 |
+| **零客户端安装** | 用户只需浏览器，无需安装任何软件 |
+
+##### 设计目标
+
+- 让内网所有用户通过浏览器使用 Word 文档生成服务
+- 无需在用户电脑安装任何软件
+- 统一管理、权限控制、审计日志
+- 集中维护，降低运维成本
+
+##### 适用场景
+
+| 场景 | 说明 | 示例 |
+|------|------|------|
+| **企业内部文档自动化** | 批量生成结构化文档 | 报表、合同、通知 |
+| **SaaS 服务集成** | 为 Web 应用添加文档能力 | 在线办公系统 |
+| **多租户服务** | 统一入口，按需调用 | 集团多部门共享 |
+| **轻量级使用** | 偶尔使用，不需要安装客户端 | 临时文档生成需求 |
+
+##### 核心组件
+
+| 层级 | 组件 | 部署位置 | 职责 |
+|------|------|----------|------|
+| **表现层** | 用户浏览器 | 用户电脑 | 界面交互、结果展示、文档下载 |
+| **应用层** | Spring AI（MCP Client） | 应用服务器 | 业务逻辑、认证授权、MCP 调用 |
+| **服务层** | MCP Server | MCP 服务器 | Word 文档操作、文件生成存储 |
+
+---
+
+#### 7.1.2 架构设计
+
+##### 整体架构图
+
+```
+                   192.168.1.0/24 内网用户
+                ┌─────┬─────┬─────┬─────┐
+                │ PC1 │ PC2 │ PC3 │ ... │
+                └──┬──┴──┬──┴──┬──┴─────┘
+                   │     │     │
+                   └─────┼─────┘
+                         │ HTTP (80/443)
+                         ▼
+             ┌───────────────────────┐
+             │   192.168.1.100       │
+             │   ┌───────────────┐   │
+             │   │  Spring AI    │   │
+             │   │  Application  │   │
+             │   │  (MCP Client) │   │
+             │   └───────┬───────┘   │
+             └───────────┼───────────┘
+                         │ MCP/HTTP (8000)
+                         ▼
+             ┌───────────────────────┐
+             │   192.168.1.101       │
+             │   ┌───────────────┐   │
+             │   │  MCP Server   │   │
+             │   │  (Word 操作)  │   │
+             │   └───────┬───────┘   │
+             │           ▼           │
+             │   [文档存储目录]       │
+             └───────────────────────┘
+```
+
+##### 数据流转
+
+```
+用户请求                Spring AI              MCP Server
+   │                       │                       │
+   │  "生成月度报告"        │                       │
+   ├──────────────────────▶│                       │
+   │                       │  调用 create_document │
+   │                       ├──────────────────────▶│
+   │                       │                       │ 生成文档
+   │                       │      返回结果         │
+   │                       │◀──────────────────────┤
+   │                       │                       │
+   │   返回下载链接/文件    │                       │
+   │◀──────────────────────┤                       │
+```
+
+##### 关键说明
+
+| 要点 | 说明 |
+|------|------|
+| **文档生成位置** | 文档在 MCP Server（192.168.1.101）生成，不在用户电脑 |
+| **传输协议** | 必须使用 HTTP 或 SSE（跨网络通信） |
+| **中间层作用** | Spring AI 作为 MCP Client，统一管理所有用户请求 |
+
+---
+
+#### 7.1.3 部署配置
+
+##### 服务层配置（192.168.1.101 - MCP Server）
+
+**步骤1：配置环境变量**
+
+创建或编辑 `.env` 文件：
+
+```env
+# 传输方式配置
+MCP_TRANSPORT=streamable-http
+MCP_HOST=0.0.0.0
+MCP_PORT=8000
+MCP_PATH=/mcp
+
+# 文档存储路径（可选）
+DOCUMENT_ROOT=/data/documents
+```
+
+**步骤2：启动服务**
+
+```bash
+# 激活虚拟环境（如果使用）
+source .venv/bin/activate  # Linux
+# 或
+.venv\Scripts\activate  # Windows
+
+# 启动服务
+python word_mcp_server.py
+```
+
+**步骤3：配置防火墙**
+
+```bash
+# Linux (Ubuntu)
+sudo ufw allow 8000/tcp
+
+# Linux (CentOS)
+sudo firewall-cmd --add-port=8000/tcp --permanent
+sudo firewall-cmd --reload
+
+# Windows PowerShell（管理员）
+netsh advfirewall firewall add rule name="MCP Server" dir=in action=allow protocol=TCP localport=8000
+```
+
+**步骤4：验证服务**
+
+```bash
+# 从应用服务器测试连接
+curl http://192.168.1.101:8000/mcp
+```
+
+##### 应用层配置（192.168.1.100 - Spring AI）
+
+**步骤1：添加依赖**
+
+`pom.xml`：
+
+```xml
+<dependencies>
+    <dependency>
+        <groupId>com.alibaba.cloud.ai</groupId>
+        <artifactId>spring-ai-alibaba-starter</artifactId>
+        <version>1.0.0-M2</version>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+</dependencies>
+```
+
+**步骤2：配置 MCP 连接**
+
+`application.yml`：
+
+```yaml
+server:
+  port: 8080
+
+spring:
+  ai:
+    alibaba:
+      mcp:
+        servers:
+          word-document-server:
+            transport: http
+            url: http://192.168.1.101:8000/mcp
+            timeout: 30000
+            enabled: true
+```
+
+**步骤3：创建 REST 接口**
+
+```java
+@RestController
+@RequestMapping("/api/document")
+public class DocumentController {
+
+    private final McpToolClient mcpToolClient;
+
+    public DocumentController(McpToolClient mcpToolClient) {
+        this.mcpToolClient = mcpToolClient;
+    }
+
+    @PostMapping("/create")
+    public ResponseEntity<String> createDocument(
+            @RequestParam String filename,
+            @RequestParam String title) {
+
+        String result = mcpToolClient.executeTool(
+            "word-document-server",
+            "create_document",
+            Map.of("filename", filename, "title", title)
+        );
+
+        return ResponseEntity.ok(result);
+    }
+
+    @PostMapping("/add-content")
+    public ResponseEntity<String> addContent(
+            @RequestParam String filename,
+            @RequestParam String heading,
+            @RequestParam String content) {
+
+        // 添加标题
+        mcpToolClient.executeTool(
+            "word-document-server",
+            "add_heading",
+            Map.of("filename", filename, "text", heading, "level", 1)
+        );
+
+        // 添加段落
+        String result = mcpToolClient.executeTool(
+            "word-document-server",
+            "add_paragraph",
+            Map.of("filename", filename, "text", content)
+        );
+
+        return ResponseEntity.ok(result);
+    }
+}
+```
+
+**步骤4：启动应用**
+
+```bash
+mvn spring-boot:run
+```
+
+##### 用户访问
+
+内网用户通过浏览器访问：
+
+```
+http://192.168.1.100:8080/api/document/create?filename=report.docx&title=月度报告
+```
+
+或通过前端页面调用 API。
+
+---
+
+#### 7.1.4 文档存储方案
+
+由于文档在 MCP Server 生成，需要解决用户获取文档的问题。
+
+##### 方案对比
+
+| 方案 | 实现方式 | 优点 | 缺点 | 适用场景 |
+|------|----------|------|------|----------|
+| **共享存储** | SMB/NFS 挂载 | 简单直接、无需开发 | 需要网络共享配置 | 中小规模 |
+| **文件 API** | MCP Server 提供下载接口 | 灵活可控 | 需要额外开发 | 需要细粒度控制 |
+| **对象存储** | MinIO/阿里云 OSS | 高可用、易扩展 | 架构复杂度增加 | 大规模生产环境 |
+
+##### 方案A：共享存储（推荐中小规模）
+
+**MCP Server 端配置**：
+
+```bash
+# Linux: 创建共享目录
+sudo mkdir -p /data/documents
+sudo chmod 777 /data/documents
+
+# 安装 Samba
+sudo apt install samba -y
+
+# 配置共享
+sudo nano /etc/samba/smb.conf
+```
+
+添加配置：
+
+```ini
+[documents]
+   path = /data/documents
+   browseable = yes
+   read only = no
+   guest ok = no
+   valid users = @documents
+```
+
+**Spring AI 端访问**：
+
+```yaml
+document:
+  storage:
+    type: shared
+    # Windows 格式
+    path: \\192.168.1.101\documents
+    # 或 Linux 挂载点
+    # path: /mnt/mcp-documents
+```
+
+##### 方案B：文件传输 API
+
+在 MCP Server 端添加文件下载接口（需要自行扩展）：
+
+```python
+# 在 MCP Server 中添加文件下载工具
+@mcp.tool()
+def get_document_content(filename: str) -> bytes:
+    """获取文档内容用于传输"""
+    file_path = os.path.join(DOCUMENT_ROOT, filename)
+    with open(file_path, 'rb') as f:
+        return base64.b64encode(f.read()).decode()
+```
+
+Spring AI 端接收并返回给用户：
+
+```java
+@GetMapping("/download/{filename}")
+public ResponseEntity<byte[]> downloadDocument(@PathVariable String filename) {
+    // 调用 MCP 获取文件内容
+    String base64Content = mcpToolClient.executeTool(
+        "word-document-server",
+        "get_document_content",
+        Map.of("filename", filename)
+    );
+
+    byte[] content = Base64.getDecoder().decode(base64Content);
+
+    return ResponseEntity.ok()
+        .header("Content-Disposition", "attachment; filename=" + filename)
+        .header("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        .body(content);
+}
+```
+
+##### 方案C：对象存储
+
+```yaml
+# Spring AI 配置
+document:
+  storage:
+    type: oss
+    endpoint: http://192.168.1.102:9000  # MinIO
+    bucket: documents
+    access-key: minioadmin
+    secret-key: minioadmin
+```
+
+MCP Server 生成文档后上传到对象存储，Spring AI 返回预签名 URL 给用户下载。
+
+---
+
+#### 7.1.5 生产环境建议
+
+##### 高可用架构
+
+```
+                    Load Balancer (Nginx/HAProxy)
+                              │
+               ┌──────────────┼──────────────┐
+               ▼              ▼              ▼
+          Spring AI      Spring AI      Spring AI
+           Node 1         Node 2         Node 3
+               │              │              │
+               └──────────────┼──────────────┘
+                              │
+                    Load Balancer
+                              │
+               ┌──────────────┼──────────────┐
+               ▼              ▼              ▼
+          MCP Server     MCP Server     MCP Server
+           Node 1         Node 2         Node 3
+               │              │              │
+               └──────────────┼──────────────┘
+                              │
+                      共享存储 / 对象存储
+```
+
+##### 安全加固清单
+
+| 类别 | 措施 | 优先级 |
+|------|------|--------|
+| **传输安全** | HTTPS/TLS 加密 | 高 |
+| **认证授权** | JWT/OAuth2 + RBAC | 高 |
+| **网络隔离** | 内网部署、防火墙规则 | 高 |
+| **审计日志** | 记录所有文档操作 | 中 |
+| **文件安全** | 访问权限控制、病毒扫描 | 中 |
+| **限流保护** | API 限流、防止滥用 | 中 |
+
+##### 监控告警
+
+```yaml
+# Prometheus 监控指标示例
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+```
+
+关键监控指标：
+
+- MCP Server 连接状态
+- 文档生成成功率
+- API 响应时间
+- 存储空间使用率
+
+##### Nginx 反向代理配置
+
+```nginx
+upstream spring-ai {
+    server 192.168.1.100:8080;
+    # 多节点时添加更多 server
+}
+
+server {
+    listen 80;
+    server_name doc.company.com;
+
+    location / {
+        proxy_pass http://spring-ai;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+---
+
+#### 7.1.6 完整部署示例
+
+##### 部署清单
+
+| 服务器 | IP | 角色 | 端口 |
+|--------|-----|------|------|
+| app-server | 192.168.1.100 | Spring AI 应用 | 8080 |
+| mcp-server | 192.168.1.101 | MCP Server | 8000 |
+| storage | 192.168.1.102 | MinIO 对象存储（可选） | 9000 |
+
+##### Docker Compose 一键部署
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  mcp-server:
+    build: ./Office-Word-MCP-Server
+    ports:
+      - "8000:8000"
+    environment:
+      - MCP_TRANSPORT=streamable-http
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8000
+    volumes:
+      - ./documents:/data/documents
+
+  spring-ai-app:
+    build: ./spring-ai-word-demo
+    ports:
+      - "8080:8080"
+    environment:
+      - MCP_SERVER_URL=http://mcp-server:8000/mcp
+    depends_on:
+      - mcp-server
+
+  # 可选：对象存储
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: server /data
+    volumes:
+      - ./minio-data:/data
+```
+
+启动命令：
+
+```bash
+docker-compose up -d
+```
+
+##### 验证部署
+
+```bash
+# 1. 检查 MCP Server
+curl http://192.168.1.101:8000/mcp
+
+# 2. 检查 Spring AI 应用
+curl http://192.168.1.100:8080/actuator/health
+
+# 3. 测试创建文档
+curl -X POST "http://192.168.1.100:8080/api/document/create" \
+  -d "filename=test.docx" \
+  -d "title=测试文档"
+
+# 4. 检查文档是否生成
+ls -la /data/documents/  # 在 MCP Server 上执行
+```
+
+---
+
+### 7.2 C/S 部署架构
+
+#### 7.2.1 架构概述
+
+**C/S（Client/Server）架构** 通过桌面客户端访问服务，提供原生应用体验。根据 MCP Server 的部署位置，分为两种模式。
+
+##### 两种模式对比
+
+| 模式 | MCP Server 位置 | 文档生成位置 | 协议 | 特点 |
+|------|-----------------|--------------|------|------|
+| **远程服务器模式** | 远程服务器 | 服务器 | HTTP/SSE | 轻量客户端，集中管理 |
+| **本地完整模式** | 用户电脑 | **用户本地** | STDIO | 离线可用，无需下载 |
+
+##### 核心特点
+
+| 特点 | 说明 |
+|------|------|
+| **桌面客户端** | 使用 Electron 构建原生桌面应用 |
+| **MCP Client 分布式** | 每个用户电脑运行独立的 MCP Client |
+| **直连 MCP Server** | 无需中间应用层，客户端直接连接 |
+| **原生体验** | 系统集成、文件管理、离线能力 |
+
+##### 技术选型
+
+| 组件 | 技术 | 说明 |
+|------|------|------|
+| 桌面客户端 | Electron | 跨平台桌面应用框架 |
+| MCP Client SDK | @modelcontextprotocol/sdk | 官方 TypeScript SDK |
+| UI 框架 | React/Vue | 根据团队技术栈选择 |
+
+---
+
+#### 7.2.2 远程服务器模式
+
+##### 架构设计
+
+MCP Server 部署在远程服务器，客户端通过网络连接。
+
+```
+         192.168.1.0/24 内网用户
+      ┌──────┬──────┬──────┬──────┐
+      │ PC1  │ PC2  │ PC3  │ ...  │
+      │      │      │      │      │
+      │┌────┐│┌────┐│┌────┐│      │
+      ││Elec││││Elec││││Elec│││      │
+      ││tron││││tron││││tron│││      │
+      ││    ││││    ││││    │││      │
+      ││MCP ││││MCP ││││MCP │││      │
+      ││Clie││││Clie││││Clie│││      │
+      ││nt  ││││nt  ││││nt  │││      │
+      │└──┬─┘│└──┬─┘│└──┬─┘│      │
+      └───┼──┴───┼──┴───┼──┴──────┘
+          │      │      │
+          └──────┼──────┘
+                 │ HTTP/SSE (8000)
+                 ▼
+      ┌─────────────────────┐
+      │   192.168.1.101     │
+      │   ┌─────────────┐   │
+      │   │  MCP Server │   │
+      │   └──────┬──────┘   │
+      │          ▼          │
+      │   [文档存储目录]     │
+      └─────────────────────┘
+```
+
+##### 核心特点
+
+| 特点 | 说明 |
+|------|------|
+| **文档位置** | 服务器端（需要下载到本地） |
+| **传输协议** | HTTP 或 SSE（跨网络） |
+| **与 B/S 区别** | 用 Electron 替代浏览器，无中间应用层 |
+| **客户端职责** | UI 界面 + MCP Client |
+
+##### 适用场景
+
+- 需要原生桌面体验，但希望集中管理文档
+- 客户端保持轻量，不安装 Python 环境
+- 多用户共享同一 MCP Server
+
+##### 部署配置
+
+**服务端配置**：与 B/S 架构相同（参考 7.1.3）
+
+**客户端配置要点**：
+
+```javascript
+// Electron 主进程中配置 MCP Client
+// 使用 @modelcontextprotocol/sdk
+
+const serverUrl = "http://192.168.1.101:8000/mcp";
+
+// 通过 HTTP 传输连接远程 MCP Server
+// 具体实现参考官方 SDK 文档
+```
+
+---
+
+#### 7.2.3 本地完整模式
+
+##### 架构设计
+
+MCP Server 随客户端一起安装在用户电脑，实现完全本地化运行。
+
+```
+用户电脑
+┌─────────────────────────────────┐
+│  ┌─────────────────────────┐    │
+│  │      Electron App       │    │
+│  │  ┌─────────────────┐    │    │
+│  │  │   MCP Client    │    │    │
+│  │  │ (@modelcontext  │    │    │
+│  │  │  protocol/sdk)  │    │    │
+│  │  └────────┬────────┘    │    │
+│  └───────────┼─────────────┘    │
+│              │ STDIO            │
+│              ▼                  │
+│  ┌─────────────────────────┐    │
+│  │      MCP Server         │    │
+│  │  (随应用安装/打包)       │    │
+│  └───────────┬─────────────┘    │
+│              ▼                  │
+│  ┌─────────────────────────┐    │
+│  │   本地文档目录           │    │
+│  │   C:\Users\xxx\Documents │    │
+│  └─────────────────────────┘    │
+└─────────────────────────────────┘
+
+文档直接在用户电脑生成，无需下载 ✅
+```
+
+##### 核心特点
+
+| 特点 | 说明 |
+|------|------|
+| **文档位置** | 用户本地电脑（无需下载） |
+| **传输协议** | STDIO（本地进程通信） |
+| **离线使用** | 完全支持，无需网络 |
+| **独立运行** | 每个用户独立运行完整服务 |
+
+##### 与 B/S 架构的关键区别
+
+| 对比项 | B/S 架构 | C/S 本地完整模式 |
+|--------|----------|------------------|
+| 文档生成位置 | 服务器 | **用户本地** |
+| 获取文档方式 | 浏览器下载 | **直接在本地打开** |
+| 网络依赖 | 必须联网 | **可离线使用** |
+| 文件管理 | 服务器统一管理 | **本地文件系统** |
+
+##### 适用场景
+
+- 需要离线使用文档生成功能
+- 文档涉及敏感信息，不希望上传服务器
+- 个人工具或小团队使用
+- 需要深度系统集成（文件管理器、右键菜单等）
+
+##### 部署配置
+
+**打包方案**：
+
+| 方案 | 说明 | 优点 | 缺点 |
+|------|------|------|------|
+| **Python 环境打包** | 使用 PyInstaller 将 MCP Server 打包为可执行文件 | 用户无需安装 Python | 应用体积增大 |
+| **内嵌 Python** | 随 Electron 分发精简版 Python | 可控性强 | 配置复杂 |
+| **依赖用户 Python** | 要求用户预装 Python | 应用体积小 | 增加用户安装成本 |
+
+**推荐方案**：使用 PyInstaller 打包，提供开箱即用体验
+
+**客户端配置要点**：
+
+```javascript
+// Electron 主进程中配置 MCP Client
+// MCP Server 可执行文件路径（打包在应用内）
+
+const serverPath = path.join(app.getAppPath(), 'mcp-server', 'word_mcp_server.exe');
+
+// 通过 STDIO 传输连接本地 MCP Server
+// 具体实现参考官方 SDK 文档
+```
+
+##### 应用分发
+
+| 平台 | 分发格式 | 说明 |
+|------|----------|------|
+| Windows | .exe / .msi | 支持自动更新 |
+| macOS | .dmg | 需要代码签名 |
+| Linux | .AppImage / .deb | 跨发行版兼容 |
+
+---
+
+#### 7.2.4 文档存储对比
+
+| 对比项 | B/S 架构 | C/S 远程模式 | C/S 本地模式 |
+|--------|----------|--------------|--------------|
+| 存储位置 | 服务器 | 服务器 | 用户本地 |
+| 获取方式 | 浏览器下载 | 客户端下载 | 直接访问 |
+| 共享协作 | 天然支持 | 天然支持 | 需要额外方案 |
+| 隐私安全 | 文档在服务器 | 文档在服务器 | 文档不离开本地 |
+| 备份恢复 | 服务端统一备份 | 服务端统一备份 | 用户自行备份 |
+
+---
+
+### 7.3 架构选型指南
+
+#### 决策流程
+
+```
+需要部署文档生成服务
+        │
+        ├─ 用户需要离线使用？
+        │   └─ 是 → C/S 本地完整模式
+        │
+        ├─ 文档涉及敏感信息，不能上服务器？
+        │   └─ 是 → C/S 本地完整模式
+        │
+        ├─ 希望用户零安装？
+        │   └─ 是 → B/S 架构
+        │
+        ├─ 需要原生桌面体验？
+        │   ├─ 是，但要集中管理 → C/S 远程服务器模式
+        │   └─ 是，要本地生成 → C/S 本地完整模式
+        │
+        └─ 需要统一管理和维护？
+            └─ 是 → B/S 架构
+```
+
+#### 三种架构全面对比
+
+| 对比项 | B/S 架构 | C/S 远程模式 | C/S 本地模式 |
+|--------|----------|--------------|--------------|
+| **客户端** | 浏览器 | Electron | Electron |
+| **MCP Client 位置** | 服务器 | 用户电脑 | 用户电脑 |
+| **MCP Server 位置** | 服务器 | 服务器 | 用户电脑 |
+| **文档生成位置** | 服务器 | 服务器 | 用户本地 |
+| **传输协议** | HTTP/SSE | HTTP/SSE | STDIO |
+| **用户安装** | 无需 | 需要 | 需要 |
+| **离线使用** | 否 | 否 | **是** |
+| **集中管理** | 是 | 是 | 否 |
+| **维护成本** | 低 | 中 | 高 |
+| **开发成本** | 低 | 中 | 高 |
+| **用户体验** | Web | 原生 | 原生 |
+
+#### 推荐场景
+
+| 场景 | 推荐架构 | 原因 |
+|------|----------|------|
+| 企业内部快速部署 | B/S | 零安装、集中管理 |
+| 重度文档用户 | C/S 远程模式 | 原生体验、集中存储 |
+| 敏感文档处理 | C/S 本地模式 | 数据不离开本地 |
+| 离线办公环境 | C/S 本地模式 | 无需网络 |
+| 个人效率工具 | C/S 本地模式 | 简单直接 |
+| SaaS 产品集成 | B/S | 易于集成、统一入口 |
 
 ---
 
