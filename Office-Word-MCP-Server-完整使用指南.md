@@ -96,6 +96,91 @@ Office-Word-MCP-Server/
 └── .env.example               # 环境变量模板
 ```
 
+#### 文档处理原理 ⚠️ 重要概念
+
+##### 核心要点：文档在哪里生成和处理？
+
+**答案：所有文档操作都在 MCP Server 所在的服务器执行，文档文件保存在 MCP Server 的本地文件系统。**
+
+##### 技术实现原理
+
+本项目使用 **python-docx** 库操作 Word 文档，该库的工作方式决定了文档必须在 MCP Server 端处理：
+
+```python
+# word_document_server/tools/document_tools.py
+async def create_document(filename: str, title: str = None, author: str = None):
+    # 1. 在 MCP Server 的本地文件系统创建文档
+    doc = Document()
+
+    # 2. 设置文档属性
+    if title:
+        doc.core_properties.title = title
+
+    # 3. 保存到 MCP Server 的本地磁盘
+    doc.save(filename)  # ← 文件保存在 Server 端
+
+    return f"Document {filename} created successfully"
+```
+
+##### 跨服务器部署场景说明
+
+**场景：MCP Server 部署在服务器A，Spring AI（MCP Client）部署在服务器B**
+
+```
+服务器B（192.168.1.100）          服务器A（192.168.1.101）
+┌──────────────────────┐          ┌──────────────────────┐
+│  Spring AI Alibaba   │          │  MCP Server          │
+│  (MCP Client)        │          │                      │
+│                      │          │  ┌────────────────┐  │
+│  1. 发送请求         │          │  │  Python 进程   │  │
+│     create_document()│──HTTP──▶│  │  python-docx   │  │
+│                      │          │  └────────┬───────┘  │
+│                      │          │           │          │
+│  3. 接收结果         │          │  2. 创建文档          │
+│     "创建成功"        │◀─HTTP───│     ↓                │
+│                      │          │  [report.docx]       │
+│                      │          │  保存在 A 的磁盘     │
+└──────────────────────┘          └──────────────────────┘
+```
+
+##### 关键说明
+
+| 问题 | 答案 |
+|------|------|
+| **文档在哪里处理？** | MCP Server 所在的服务器（服务器A） |
+| **文档保存在哪里？** | MCP Server 的本地文件系统（服务器A） |
+| **MCP Client 能直接访问文档吗？** | ❌ 不能，Client 只接收文本结果（如"创建成功"） |
+| **filename 参数是相对于谁？** | 相对于 MCP Server 的工作目录 |
+| **python-docx 安装在哪里？** | MCP Server 所在的服务器 |
+
+##### 为什么这样设计？
+
+这是 **MCP 协议的标准设计模式**：
+
+- **Server（服务器A）** = 能力提供者
+  - 拥有文档处理能力（python-docx）
+  - 访问本地文件系统
+  - 执行实际操作
+
+- **Client（服务器B）** = 能力消费者
+  - 通过 MCP 协议调用工具
+  - 只接收文本结果（JSON/String）
+  - **不直接访问文档文件**
+
+##### 实际影响和解决方案
+
+如果需要在服务器B使用生成的文档，需要：
+
+| 方案 | 实现方式 | 适用场景 |
+|------|----------|----------|
+| **文件共享** | 在服务器A设置 NFS/SMB | 内网环境 |
+| **对象存储** | 文档上传至 MinIO/阿里云OSS | 生产环境 |
+| **HTTP 下载** | 扩展 MCP Server 添加下载接口 | 需要细粒度控制 |
+
+详细的部署架构和文件分发方案请参考 [第7章：企业级部署架构](#第7章企业级部署架构)。
+
+---
+
 ### 1.3 功能特性
 
 #### ✅ 文档管理
